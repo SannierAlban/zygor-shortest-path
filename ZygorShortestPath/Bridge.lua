@@ -16,6 +16,8 @@ local defaults = {
 
 -- Zygor shows at most this many steps; "all" (0) is capped here too.
 local MAX_STEPS = 5
+-- How far past the current step to look for places when steps are skipped (no coordinates, other class...).
+local LOOKAHEAD = 15
 -- Two stops closer than this on one map (a fraction of the map, about half a percent) are one place.
 local SAME_PLACE = 0.005
 
@@ -126,8 +128,15 @@ local function Try(method, object, ...)
 	return nil
 end
 
+local function ValidPoint(map, x, y)
+	map, x, y = tonumber(map), tonumber(x), tonumber(y)
+	if map and x and y and map > 0 and x >= 0 and x <= 1 and y >= 0 and y <= 1 then
+		return map, x, y
+	end
+end
+
 -- Where a step sends you: its first visible goto that is not inline travel, as Zygor's ShowWaypoints picks it,
--- else its last visible goto.
+-- else its last visible goto, else the start of its path (an NPC who walks a patrol has no fixed goto).
 local function StepPlace(step)
 	local last
 	for _, goal in ipairs(step.goals or {}) do
@@ -144,23 +153,46 @@ local function StepPlace(step)
 			end
 		end
 	end
-	return last
+	if last then
+		return last
+	end
+	local path = type(step.waypath) == "table" and step.waypath.coords
+	local first = type(path) == "table" and path[1]
+	if type(first) == "table" then
+		local map, x, y = ValidPoint(first.map or step.map, first.x, first.y)
+		if map then
+			-- Name the place after the step's first goal with text, such as "talk Mountaineer Kadrell".
+			local goal = step.goals and step.goals[1]
+			return { map = map, x = x, y = y, goal = goal }
+		end
+	end
 end
 
--- The steps after the current one that Zygor's window shows, each as a place: steps Zygor would hide (wrong
--- faction, class...) and steps without coordinates are left out.
+local function StepTitle(num, goal)
+	local text = goal and CleanTitle(Try(goal.GetText, goal)) or "Zygor"
+	return text ~= "Zygor" and ("Étape %d : %s"):format(num, text) or ("Étape %d"):format(num)
+end
+
+-- How many stops to send: as many steps as Zygor's window shows ("steps to show", capped at MAX_STEPS).
+local function StopCount()
+	local count = tonumber(Zygor().db.profile.showcountsteps) or 1
+	if count <= 0 or count > MAX_STEPS then
+		count = MAX_STEPS
+	end
+	return count
+end
+
+-- The places of the steps after the current one, in guide order, up to LOOKAHEAD steps ahead: steps Zygor would hide
+-- (wrong faction, class...) and steps without any place are left out, so the route can still fill its stops.
+-- Titles are read only for the places a route uses (see Route).
 local function Upcoming()
 	local zgv = Zygor()
 	local guide, current = zgv and zgv.CurrentGuide, zgv and tonumber(zgv.CurrentStepNum)
 	if not (db.ahead and guide and type(guide.steps) == "table" and current) then
 		return {}
 	end
-	local count = tonumber(zgv.db.profile.showcountsteps) or 1
-	if count <= 0 or count > MAX_STEPS then
-		count = MAX_STEPS
-	end
 	local places = {}
-	for num = current + 1, math.min(current + count - 1, #guide.steps) do
+	for num = current + 1, math.min(current + LOOKAHEAD, #guide.steps) do
 		local step = guide.steps[num]
 		if
 			type(step) == "table"
@@ -168,8 +200,7 @@ local function Upcoming()
 		then
 			local place = StepPlace(step)
 			if place then
-				local text = CleanTitle(Try(place.goal.GetText, place.goal))
-				place.title = text ~= "Zygor" and ("Étape %d : %s"):format(num, text) or ("Étape %d"):format(num)
+				place.num = num
 				places[#places + 1] = place
 			end
 		end
@@ -191,9 +222,14 @@ local function Route()
 	local way = Zygor().Pointer.DestinationWaypoint
 	-- A waypoint you set by hand in Zygor is not part of the guide: no guide steps after it.
 	if way.type ~= "manual" then
+		local count = StopCount()
 		for _, place in ipairs(Upcoming()) do
+			if #stops >= count then
+				break
+			end
 			if not SamePlace(place, stops[#stops]) then
-				stops[#stops + 1] = { map = place.map, x = place.x, y = place.y, title = place.title, hold = true }
+				local title = StepTitle(place.num, place.goal)
+				stops[#stops + 1] = { map = place.map, x = place.x, y = place.y, title = title, hold = true }
 			end
 		end
 	end

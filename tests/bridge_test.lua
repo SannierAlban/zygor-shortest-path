@@ -36,11 +36,23 @@ ZGV.CurrentGuide = {steps={
   step({goal(1429,0.9,0.9,"Horde only")},false),
   step({goal(1429,0.501,0.501,"Loot")}),
   step({{text="no coords"}}),
+  {goals={goal(nil,nil,nil,"Kadrell")}, waypath={coords={{map=1432,x=0.3267,y=0.4972}}}, AreRequirementsMet=function() return true end},
+  step({goal(1432,0.37,0.47,"Accept Honor")}),
+  step({goal(1432,0.33,0.50,"Turn in Honor")}),
+  step({goal(1455,0.65,0.88,"Warrior trainer")},false),
+  step({goal(1455,0.10,0.10,"Too far")}),
 }}
 calls = {}
 SlashCmdList.ZYGORSHORTESTPATH("on")
-assert(#lastStops==2, "expected 2 stops, got "..#lastStops)
+-- Fills to 5 stops past skipped steps; the patrolling NPC's path start is a stop; step 10 is not needed.
+assert(#lastStops==5, "expected 5 stops, got "..#lastStops)
 assert(lastStops[2].x==0.5 and lastStops[2].title=="Étape 2 : Kill wolves", lastStops[2].title)
+assert(lastStops[3].map==1432 and lastStops[3].x==0.3267 and lastStops[3].title=="Étape 6 : Kadrell", lastStops[3].title)
+assert(lastStops[4].title=="Étape 7 : Accept Honor" and lastStops[5].title=="Étape 8 : Turn in Honor", lastStops[5].title)
+prof.showcountsteps = 2
+SlashCmdList.ZYGORSHORTESTPATH("on")
+assert(#lastStops==2, "follows Zygor's count")
+prof.showcountsteps = 5
 SlashCmdList.ZYGORSHORTESTPATH("etapes")
 assert(#lastStops==1, "ahead off")
 SlashCmdList.ZYGORSHORTESTPATH("etapes")

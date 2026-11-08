@@ -14,7 +14,9 @@ Aucun des deux add-ons n'est modifié :
 Les étapes suivantes affichées dans la fenêtre Zygor (réglage « étapes à afficher », jusqu'à 5) sont envoyées
 comme arrêts supplémentaires : Shortest Path guide vers l'étape en cours (minicarte et grande carte) et dessine
 les trajets vers les étapes suivantes sur la grande carte, plus pâles. Les étapes sans coordonnées, celles que
-Zygor masque (mauvaise faction, classe…) et celles au même endroit que la précédente ne créent pas d'arrêt.
+Zygor masque (mauvaise faction, classe…) et celles au même endroit que la précédente ne créent pas d'arrêt ;
+le pont regarde alors plus loin dans le guide (jusqu'à 15 étapes) pour compléter le nombre d'arrêts. Un PNJ qui
+patrouille (étape avec `path` et sans `goto`) devient un arrêt au début de son trajet.
 
 Par défaut la flèche et le tracé de Zygor sont masqués (via ses propres options `arrowshow` et
 `maplines_enabled`) pour ne garder que ceux de Shortest Path. Les valeurs d'origine sont mémorisées et
