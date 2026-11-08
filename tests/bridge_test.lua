@@ -8,9 +8,10 @@ function hooksecurefunc(t,n,h) local o=t[n] t[n]=function(...) local r=o(...) h(
 local frameScript
 function CreateFrame() return {RegisterEvent=function() end, SetScript=function(_,_,f) frameScript=f end} end
 local calls={}
+lastStops={}
 local cur
 ShortestPathForever={API={
- NavigateRoute=function(o,s) calls[#calls+1]=s[1] cur=1 return true end,
+ NavigateRoute=function(o,s) calls[#calls+1]=s[1] lastStops=s cur=1 return true end,
  CurrentStop=function(o) return cur end, Cancel=function() cur=nil calls[#calls+1]="cancel" end,
  RenameStop=function(o,i,t) calls[#calls+1]="rename:"..t end, Ended=function() end }}
 local prof = setmetatable({}, {__index={arrowshow=true, maplines_enabled=true}})
@@ -22,11 +23,33 @@ assert(prof.arrowshow==false and prof.maplines_enabled==false, "options not hidd
 ZGV.Pointer:FindTravelPath({m=1429,x=0.4,y=0.6,title="|cffffffffTalk to Bob|r\n(in Goldshire)"})
 flush()
 assert(calls[1].map==1429 and calls[1].title=="Talk to Bob" and calls[1].hold, "nav")
-ZGV.Pointer.DestinationWaypoint.title="Kill wolves"
+assert(#lastStops==1, "single stop without guide")
+
+-- Next steps: Zygor shows 4 steps -> current + 3 later; one is wrong-faction, one is at the same place as before it.
+local function goal(map,x,y,text,extra) local g={map=map,x=x,y=y,GetText=function() return "|cffffffff"..text.."|r" end,IsVisible=function() return true end,IsInlineTravel=function() return extra=="inline" end} return g end
+local function step(goals,ok) return {goals=goals,AreRequirementsMet=function() return ok~=false end} end
+prof.showcountsteps = 5
+ZGV.CurrentStepNum = 1
+ZGV.CurrentGuide = {steps={
+  step({goal(1429,0.4,0.6,"Bob")}),
+  step({goal(1429,0.1,0.1,"road","inline"), goal(1429,0.5,0.5,"Kill wolves")}),
+  step({goal(1429,0.9,0.9,"Horde only")},false),
+  step({goal(1429,0.501,0.501,"Loot")}),
+  step({{text="no coords"}}),
+}}
+calls = {}
+SlashCmdList.ZYGORSHORTESTPATH("on")
+assert(#lastStops==2, "expected 2 stops, got "..#lastStops)
+assert(lastStops[2].x==0.5 and lastStops[2].title=="Étape 2 : Kill wolves", lastStops[2].title)
+SlashCmdList.ZYGORSHORTESTPATH("etapes")
+assert(#lastStops==1, "ahead off")
+SlashCmdList.ZYGORSHORTESTPATH("etapes")
+calls = {}
+ZGV.Pointer.DestinationWaypoint.title="Talk to Bob again"
 tickers[1].f()
-assert(calls[2]=="rename:Kill wolves", tostring(calls[2]))
+assert(calls[1]=="rename:Talk to Bob again", tostring(calls[1]))
 ZGV.Pointer:ClearWaypoints() flush()
-assert(calls[3]=="cancel")
+assert(calls[2]=="cancel")
 SlashCmdList.ZYGORSHORTESTPATH("off")
 assert(prof.arrowshow==true and prof.maplines_enabled==true, "restore")
 print("ALL OK")

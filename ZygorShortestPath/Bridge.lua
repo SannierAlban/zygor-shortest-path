@@ -11,7 +11,13 @@ local defaults = {
 	enabled = true, -- send Zygor's destinations to Shortest Path
 	hideZygorArrow = true, -- one arrow on screen: Shortest Path's
 	hideZygorLines = true, -- one route on the map: Shortest Path's
+	ahead = true, -- also send the next steps Zygor shows (its "steps to show" setting), drawn on the world map
 }
+
+-- Zygor shows at most this many steps; "all" (0) is capped here too.
+local MAX_STEPS = 5
+-- Two stops closer than this on one map (a fraction of the map, about half a percent) are one place.
+local SAME_PLACE = 0.005
 
 ---@type table
 local db
@@ -19,7 +25,7 @@ local db
 ---@type table
 local saved
 
--- The destination last handed to Shortest Path, as "map:x:y" rounded to a tenth of a map percent.
+-- The route last handed to Shortest Path: every stop's "map:x:y", rounded to a tenth of a map percent, joined.
 local sentKey
 local sentTitle
 local hooked = false
@@ -109,18 +115,107 @@ local function Destination()
 	return map, x, y, CleanTitle(way.title or (way.goal and way.goal.GetText and way.goal:GetText()))
 end
 
+local function Try(method, object, ...)
+	if type(method) ~= "function" then
+		return nil
+	end
+	local ok, result = pcall(method, object, ...)
+	if ok then
+		return result
+	end
+	return nil
+end
+
+-- Where a step sends you: its first visible goto that is not inline travel, as Zygor's ShowWaypoints picks it,
+-- else its last visible goto.
+local function StepPlace(step)
+	local last
+	for _, goal in ipairs(step.goals or {}) do
+		local map, x, y = tonumber(goal.map), tonumber(goal.x), tonumber(goal.y)
+		if
+			map and x and y and map > 0 and x >= 0 and x <= 1 and y >= 0 and y <= 1
+			and goal.action ~= "mapmarker"
+			and not goal.force_noway
+			and Try(goal.IsVisible, goal) ~= false
+		then
+			last = { map = map, x = x, y = y, goal = goal }
+			if not Try(goal.IsInlineTravel, goal) then
+				return last
+			end
+		end
+	end
+	return last
+end
+
+-- The steps after the current one that Zygor's window shows, each as a place: steps Zygor would hide (wrong
+-- faction, class...) and steps without coordinates are left out.
+local function Upcoming()
+	local zgv = Zygor()
+	local guide, current = zgv and zgv.CurrentGuide, zgv and tonumber(zgv.CurrentStepNum)
+	if not (db.ahead and guide and type(guide.steps) == "table" and current) then
+		return {}
+	end
+	local count = tonumber(zgv.db.profile.showcountsteps) or 1
+	if count <= 0 or count > MAX_STEPS then
+		count = MAX_STEPS
+	end
+	local places = {}
+	for num = current + 1, math.min(current + count - 1, #guide.steps) do
+		local step = guide.steps[num]
+		if
+			type(step) == "table"
+			and (zgv.db.profile.showwrongsteps or Try(step.AreRequirementsMet, step) ~= false)
+		then
+			local place = StepPlace(step)
+			if place then
+				local text = CleanTitle(Try(place.goal.GetText, place.goal))
+				place.title = text ~= "Zygor" and ("Étape %d : %s"):format(num, text) or ("Étape %d"):format(num)
+				places[#places + 1] = place
+			end
+		end
+	end
+	return places
+end
+
+local function SamePlace(a, b)
+	return a.map == b.map and (a.x - b.x) ^ 2 + (a.y - b.y) ^ 2 <= SAME_PLACE ^ 2
+end
+
+-- The current destination, then the next steps' places; a step at the place before it adds no stop.
+local function Route()
+	local map, x, y, title = Destination()
+	if not map then
+		return nil
+	end
+	local stops = { { map = map, x = x, y = y, title = title, hold = true } }
+	local way = Zygor().Pointer.DestinationWaypoint
+	-- A waypoint you set by hand in Zygor is not part of the guide: no guide steps after it.
+	if way.type ~= "manual" then
+		for _, place in ipairs(Upcoming()) do
+			if not SamePlace(place, stops[#stops]) then
+				stops[#stops + 1] = { map = place.map, x = place.x, y = place.y, title = place.title, hold = true }
+			end
+		end
+	end
+	local keys = {}
+	for index, stop in ipairs(stops) do
+		keys[index] = Key(stop.map, stop.x, stop.y)
+	end
+	return stops, table.concat(keys, "|")
+end
+
 local function Sync(force)
 	pending = false
 	local api = API()
 	if not (db and db.enabled and api and Zygor()) then
 		return
 	end
-	local map, x, y, title = Destination()
-	if not map then
+	local stops, key = Route()
+	if not stops then
 		Cancel()
 		return
 	end
-	local key = Key(map, x, y)
+	local title = stops[1].title
 	if key == sentKey and not force then
 		-- Same place, new label: rename the stop without replanning.
 		if title ~= sentTitle and api.CurrentStop(OWNER) and api.RenameStop then
@@ -136,8 +231,9 @@ local function Sync(force)
 	if key == failedKey and not force and GetTime() - failedAt < RETRY_SECONDS then
 		return
 	end
-	-- hold: Zygor, not Shortest Path, decides when a step is done and moves on to the next destination.
-	local started = api.NavigateRoute(OWNER, { { map = map, x = x, y = y, title = title, hold = true } })
+	-- hold: Zygor, not Shortest Path, decides when a step is done; the route is sent again as Zygor moves on.
+	-- Shortest Path guides to the first stop (minimap and world map) and draws the later hops on the world map.
+	local started = api.NavigateRoute(OWNER, stops)
 	if started then
 		sentKey, sentTitle, failedKey = key, title, nil
 	else
@@ -183,11 +279,18 @@ end
 
 local function Status()
 	local api = API()
-	Print(("liaison %s · flèche Zygor %s · tracé Zygor %s"):format(
+	Print(("liaison %s · étapes suivantes %s · flèche Zygor %s · tracé Zygor %s"):format(
 		OnOff(db.enabled),
+		db.ahead and "affichées" or "masquées",
 		db.hideZygorArrow and "masquée" or "visible",
 		db.hideZygorLines and "masqué" or "visible"
 	))
+	local stops = Route()
+	if stops and #stops > 1 then
+		for index = 2, #stops do
+			Print(("  puis %s"):format(stops[index].title))
+		end
+	end
 	local map, x, y, title = Destination()
 	if map then
 		Print(("destination Zygor : %s (carte %d, %.1f, %.1f)"):format(title, map, x * 100, y * 100))
@@ -220,12 +323,16 @@ SlashCmdList.ZYGORSHORTESTPATH = function(input)
 	elseif command == "trace" or command == "tracé" or command == "lines" then
 		db.hideZygorLines = not db.hideZygorLines
 		ApplyZygorOptions()
+	elseif command == "etapes" or command == "étapes" or command == "ahead" then
+		db.ahead = not db.ahead
+		Sync(true)
 	elseif command == "go" or command == "resume" then
 		-- Back to Zygor's destination after planning another journey in Shortest Path.
 		Sync(true)
 	elseif command ~= "" and command ~= "status" then
 		Print("/zsp on|off — activer/couper la liaison")
 		Print("/zsp go — reprendre la destination Zygor (après un autre trajet)")
+		Print("/zsp etapes — afficher/masquer les étapes suivantes sur la grande carte")
 		Print("/zsp fleche — afficher/masquer la flèche Zygor")
 		Print("/zsp trace — afficher/masquer le tracé Zygor sur la carte")
 		return

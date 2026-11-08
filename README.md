@@ -11,6 +11,11 @@ Aucun des deux add-ons n'est modifié :
 - Shortest Path est piloté par son API publique `ShortestPathForever.API.NavigateRoute`, comme son
   intégration RestedXP. Le point est envoyé avec `hold = true` : c'est Zygor qui décide quand l'étape est finie.
 
+Les étapes suivantes affichées dans la fenêtre Zygor (réglage « étapes à afficher », jusqu'à 5) sont envoyées
+comme arrêts supplémentaires : Shortest Path guide vers l'étape en cours (minicarte et grande carte) et dessine
+les trajets vers les étapes suivantes sur la grande carte, plus pâles. Les étapes sans coordonnées, celles que
+Zygor masque (mauvaise faction, classe…) et celles au même endroit que la précédente ne créent pas d'arrêt.
+
 Par défaut la flèche et le tracé de Zygor sont masqués (via ses propres options `arrowshow` et
 `maplines_enabled`) pour ne garder que ceux de Shortest Path. Les valeurs d'origine sont mémorisées et
 restaurées avec `/zsp off`.
@@ -26,6 +31,7 @@ Requiert `ZygorGuidesViewerForever` et `ShortestPathForever`.
 |---|---|
 | `/zsp` | État : liaison, destination Zygor, suivi par Shortest Path |
 | `/zsp on` / `/zsp off` | Active / coupe la liaison (restaure la flèche et le tracé Zygor) |
+| `/zsp etapes` | Affiche / masque les étapes suivantes sur la grande carte |
 | `/zsp go` | Reprend la destination Zygor après un autre trajet Shortest Path |
 | `/zsp fleche` | Affiche / masque la flèche Zygor |
 | `/zsp trace` | Affiche / masque le tracé Zygor sur la carte |
