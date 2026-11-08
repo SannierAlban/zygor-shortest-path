@@ -1,0 +1,11 @@
+## Interface: 16001
+## Title: Zygor + Shortest Path
+## Notes: Sends Zygor's current guide destination to Shortest Path Forever, so its fastest route is drawn on the map and minimap.
+## Author: Alban Sannier
+## Version: 1.0.0
+## Category: Map
+## Dependencies: ZygorGuidesViewerForever, ShortestPathForever
+## SavedVariables: ZygorShortestPathDB
+## X-License: MIT
+
+Bridge.lua
